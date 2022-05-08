@@ -1,4 +1,3 @@
-from audioop import add
 import os
 import pymongo
 import json
@@ -9,8 +8,8 @@ from pymongo import MongoClient
 from bson.objectid import ObjectId
 from bson.son import SON
 
-HOST_IP = "18.207.247.141"
-HOST_PORT = "27017"
+HOST_IP = "3.95.151.189"
+HOST_PORT = "27023"
 
 def main():
 
@@ -82,8 +81,8 @@ def main():
 
             results = db.tipCollection.aggregate([
                 {"$sort":{"compliment_count":-1}},
-                { "$limit": 500 },
-                {"$project": {"user_id": "user_id" }}
+                { "$limit": 100 },
+                {"$project": {"user_id": "$user_id" }}
             ])
             
             for result in results:
@@ -126,10 +125,10 @@ def main():
             query = {
                 "categories": "Restaurants",
                 "attributes.BusinessParking": {"$exists": True},
-                "attributes.BusinessParking.valet": True,
+                "attributes.BusinessParking.valet": "True",
                 "hours": {"$ne": None}
             }
-            res = businessCollection.find(query).limit(30)
+            res = businessCollection.find(query).limit(80)
             # Since the hours are stored as string, queries need to happen first, then the range
             # can be checked. It might be worthwhile to convert it to a tuple of start and end times.
             valid = []
@@ -171,11 +170,11 @@ def main():
         elif user_val == '5':
             print("Selected 5")
             print("Use Case: Find restaurants in a certain zip code that provides delivery services.")
-            businessZip = input("Enter postal code: ")
+            loc = input("Enter postal code (Ex. 93101): ")
             
-            restaurants=db.businessCollection.find({"postal_code":businessZip, "attributes.RestaurantsDelivery":"True"},{"business_id":1,"name":1}).limit(10)
+            restaurants=db.businessCollection.find({"postal_code":loc, "attributes.RestaurantsDelivery":"True"},{"business_id":1,"name":1}).limit(10)
             
-            if len(list(results.clone())) > 0:
+            if len(list(restaurants.clone())) > 0:
                 for res in restaurants:
                     print(res)
             else:
@@ -235,7 +234,7 @@ def main():
             print("Selected 8")
             print("Use Case: Find average star rating for every state. Display the state and the star ratings")
             results = db.businessCollection.aggregate([
-                {"$group": {"_id": "$state", "avg_star": {"$avg": "$star"}}},
+                {"$group": {"_id": "$state", "avg_star": {"$avg": "$stars"}}},
                 { "$limit": 500 },
                 {"$project": {"state":"$state", "avg_star":"$avg_star"}}
             ])
@@ -251,13 +250,22 @@ def main():
         elif user_val == '9':
             try:
                 print("Selected 9")
-                print("Use case: Find restaurants in a certain zip code where you don’t have to make reservations")
+                print("Use case: Find restaurants in a certain zip code where you don't have to make reservations")
+                # Get suggestions for the postal code
+                query = {
+                    "attributes.RestaurantsReservations": "False"
+                }
+                res = businessCollection.find(query, {"postal_code": 1}).limit(5)
+                print("Possible codes to check:")
+                # Actually go through the use case
+                for r in res:
+                    print(r)
                 z = input("Enter the postal code to check: ")
                 query = {
                     "postal_code": z,
-                    "attributes.RestaurantsReservation": False
+                    "attributes.RestaurantsReservations": "False"
                 }
-                res = businessCollection.find(query).limit(10)
+                res = businessCollection.find(query, {"name": 1, "postal_code": 1}).limit(10)
                 for r in res:
                     print(r)
             except Exception as e:
@@ -340,12 +348,13 @@ def main():
                     print("Review Data")
                     print("Review ID: " + current["review_id"])
                     print("Stars given: " + str(current["stars"]))
-                    print(current["text"][0:50])
+                    print(current["text"][0:70])
                     stars = int(input("How many stars would you like to give? (0-5) ")) % 6
                     txt = input("What's the new review text?\n")
-                    success = reviewCollection.update_one({"review_id": filter}, {"$set": {"stars": stars, "text": txt}})
-                    if success.modified_count > 0:
+                    success = reviewCollection.update_one({"business_id": current["business_id"], "_id": current["_id"]}, {"$set": {"stars": stars, "text": txt}})
+                    if success["modified_count"] > 0:
                         print("Update successful")
+                        print(reviewCollection.find_one({"_id": current["_id"]}))
                     else:
                         print("Update failed")
                 elif option == 2:
@@ -357,13 +366,14 @@ def main():
                     print("Useful: " + str(current["useful"]))
                     print("Funny: " + str(current["funny"]))
                     print("Cool: " + str(current["cool"]))
-                    print(current["text"][0:50])
+                    print(current["text"][0:70])
                     stat = input("Mark as cool, funny, or useful? (cool, funny, useful) ")
                     if stat not in ["cool", "funny", "useful"]:
                         raise Exception("Not a valid mark")
-                    success = reviewCollection.update_one({"review_id": filter}, {"$inc": {stat: 1}})
-                    if success.modified_count > 0:
+                    success = reviewCollection.update_one({"business_id": current["business_id"], "_id": current["id"]}, {"$inc": {stat: 1}})
+                    if success["modified_count"] > 0:
                         print("Update successful")
+                        print(reviewCollection.find_one({"_id": current["_id"]}))
                     else:
                         print("Update failed")
                 else:
@@ -410,16 +420,19 @@ def main():
         elif user_val == '14':
             print("Selected 14")
             print("Use Case: Delete a user based on the user id ")
-            try:
-                userID = input("Enter the user id to delete: ")
-                db.userCollection.delete_one({"user_id": userID})
+            userID = input("Enter the user id to delete: ")
+            db.userCollection.delete_one({"user_id": userID})
+            results = db.userCollection.find({"user_id": userID})
+            
+            if len(list(results.clone())) > 0:
+                print("Deletion failed")
+        
+            else:
                 print("Deletion successful")
-
-            except Exception as e:
-                print(e)
-
+                
             proceed = input("Press any key to continue ")
             continue
+            
 
         elif user_val == '15':
             try:
@@ -433,7 +446,8 @@ def main():
                     {"$count": "yelpers"}
                 ]
                 res = userCollection.aggregate(pipeline)
-                print(res)
+                for r in res:
+                    print(r)
             except Exception as e:
                 print(e)
             proceed = input("Press any key to continue ")
@@ -464,4 +478,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
